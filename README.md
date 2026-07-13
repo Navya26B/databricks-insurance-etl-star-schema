@@ -1,94 +1,125 @@
-Databricks Insurance ETL — Star Schema
+# Databricks Insurance ETL – Lakehouse & Star Schema
 
-Databricks-native ETL pipeline for insurance claims — Bronze/Silver/Gold
-lakehouse with Auto Loader, Delta Live Tables, and a star schema for claims
-fraud triage.
+> **A production-style Databricks Lakehouse ETL pipeline for insurance claims using Auto Loader, Delta Live Tables (DLT), Unity Catalog, Delta Lake, and a Medallion (Bronze–Silver–Gold) architecture. The pipeline delivers an analytics-ready star schema to support claims fraud triage and business reporting.**
 
-A Databricks-native lakehouse pipeline that ingests insurance claims and agent
-data, applies incremental ingestion and data quality gating, and models the
-result into a star schema built to surface claims and agents worth prioritising
-for fraud investigation.
+---
 
-Business Problem
+## Overview
 
-An insurance company's claims and fraud investigation team currently reviews
-submitted claims without a systematic way to prioritise them, which doesn't
-scale as claim volume grows. This project ingests claims and agent data,
-cleans and validates it, and produces analytics-ready datasets that highlight
-which claims show patterns consistent with fraud (early-claim timing,
-abnormal reporting lag, amount outliers) and which agents show patterns
-worth reviewing (claim concentration, tenure vs. flagged-claim rate).
+This project demonstrates how to build an end-to-end ETL pipeline on the Databricks Lakehouse Platform.
 
-This is a triage and prioritisation system, not a fraud verdict engine — it
-surfaces claims and agents for human investigation rather than making
-automated determinations.
+Raw insurance claims and employee data are incrementally ingested, validated, transformed through Bronze, Silver, and Gold layers, and modeled into a dimensional star schema for analytics.
 
-Architecture
+> **Note:** This project is a **fraud triage system**, not a fraud prediction model. It identifies claims and agents that should be prioritised for human investigation rather than making automated fraud decisions.
 
+---
+
+# Business Problem
+
+Insurance companies process thousands of claims every day, making manual review difficult and expensive.
+
+This project helps investigators prioritise claims by surfacing records that exhibit patterns commonly associated with fraud, including:
+
+- Early claims after policy inception
+- Long reporting delays
+- High claim amounts
+- Agents with unusually high claim concentrations
+- High flagged-claim rates relative to agent tenure
+
+The output is intended to support **human investigation**, not automatically classify claims as fraudulent.
+
+---
+
+# Architecture
+
+```text
 employee_data.csv / insurance_data.csv
-            |
-            v
-   Unity Catalog Volume (landing zone)
-            |
-            v
-   Auto Loader (incremental, schema-evolution-aware ingestion)
-            |
-            v
-   Bronze (Delta tables, raw + ingestion metadata)
-            |
-   +--------+-----------------+
-   v                          v
-Silver: claims_data       Silver: employee_data
-(Delta Live Tables,       (standalone notebook,
- data quality             cleaned + deduplicated)
- expectations,
- derived date fields)
-            |                          |
-            +------------+-------------+
-                         v
-                   Gold (star schema)
-        dim_agent . dim_customer . dim_policy . dim_date
-                   fact_claims
-                         |
-                         v
-             Purpose-built marts (fraud signals,
-             loss ratio, agent risk view)
-                         |
-                         v
-               Databricks SQL / Lakeview Dashboard
+                │
+                ▼
+     Unity Catalog Volume (Landing Zone)
+                │
+                ▼
+ Auto Loader (Incremental Ingestion)
+                │
+                ▼
+      Bronze Delta Tables
+                │
+     ┌──────────┴──────────┐
+     ▼                     ▼
+Silver Claims        Silver Employees
+ (Delta Live Tables)   (PySpark)
+     │                     │
+     └──────────┬──────────┘
+                ▼
+        Gold Star Schema
+                │
+   ┌────────────┼────────────┐
+   ▼            ▼            ▼
+fact_claims  Dimension Tables  Business Marts
+                │
+                ▼
+ Databricks SQL / Lakeview Dashboard
+```
 
-Data Model
+---
 
-Star schema, grain of fact_claims = one row per claim transaction.
+# Tech Stack
 
+| Category | Technologies |
+|-----------|--------------|
+| Platform | Databricks |
+| Storage | Delta Lake |
+| Governance | Unity Catalog |
+| Ingestion | Auto Loader |
+| Processing | PySpark, Delta Live Tables (DLT) |
+| Querying | Spark SQL |
+| Data Model | Star Schema |
+| Architecture | Medallion (Bronze, Silver, Gold) |
 
-dim_agent — agent/employee attributes (SCD Type 1 — see
-design decisions for why SCD2 was scoped out)
-dim_customer — customer attributes (SCD Type 1)
-dim_policy — policy attributes (SCD Type 1)
-dim_date — standard calendar dimension, role-played across transaction,
-loss, and report dates
-fact_claims — claim-level measures and foreign keys to all dimensions
+---
 
+# Data Model
 
-Data Quality
+The Gold layer follows a dimensional star schema.
 
-Data quality is enforced declaratively in the Silver layer using Delta Live
-Tables expectations — invalid claim amounts, missing customer/agent/policy
-references, and impossible date sequences are quarantined automatically.
-Late-reported claims are flagged rather than dropped, since reporting delay is
-itself a potential fraud signal, not a data error.
+### Fact Table
 
-Tech Stack
+- **fact_claims**
+  - One row per insurance claim transaction
 
-Databricks (Auto Loader, Delta Live Tables, Unity Catalog, Delta Lake),
-PySpark, SQL. See design decisions for the
-reasoning behind each architectural choice.
+### Dimension Tables
 
-Repository Structure
+- **dim_agent**
+- **dim_customer**
+- **dim_policy**
+- **dim_date**
 
+Current implementation uses **Slowly Changing Dimension (SCD) Type 1**.
+
+---
+
+# Data Quality
+
+Data quality is enforced declaratively in the Silver layer using **Delta Live Tables Expectations**.
+
+Validation rules include:
+
+- Invalid claim amounts
+- Missing customer references
+- Missing agent references
+- Missing policy references
+- Invalid date sequences
+
+Late-reported claims are **flagged rather than removed**, since reporting delay is itself a useful fraud signal.
+
+---
+
+# Repository Structure
+
+```text
 databricks-insurance-etl-star-schema/
 ├── README.md
+├── dataset/
 ├── docs/
 │   ├── data_profile.md
 │   ├── design_decisions.md
@@ -97,39 +128,133 @@ databricks-insurance-etl-star-schema/
 │   ├── 01_data_profiling.py
 │   ├── 02_bronze_autoloader.py
 │   ├── 03_silver_employee.py
-│   └── silver_claims_pipeline/        # DLT pipeline source
-├── .github/workflows/ci.yml
-└── dataset/                            # see note below on inclusion
+│   └── silver_claims_pipeline/
+└── .github/
+    └── workflows/
+```
 
-Project Status
+---
 
-In active development. Bronze and Silver layers are complete; Gold layer
-(star schema + fraud signal marts) is in progress. See the
-project roadmap for the full phased build plan.
+# Pipeline Layers
 
-How to Run
+## Bronze
 
+- Incremental ingestion using Auto Loader
+- Raw Delta tables
+- Schema evolution support
+- Ingestion metadata
 
-Create a Unity Catalog catalog and bronze/silver/gold schemas.
-Upload employee_data.csv and insurance_data.csv to a Unity Catalog
-Volume under the bronze schema.
-Run notebooks/02_bronze_autoloader.py to populate Bronze tables.
-Register notebooks/silver_claims_pipeline/ as a Delta Live Tables
-pipeline, targeting the silver schema.
-Run notebooks/03_silver_employee.py to populate the cleaned employee
-table.
-(Gold layer notebooks — to be added.)
+## Silver
 
+### Claims Pipeline
 
-Data Source
+- Delta Live Tables (DLT)
+- Data quality expectations
+- Data cleansing
+- Derived business fields
+- Validation rules
 
-Dataset: Insurance Claims for Fraud Detection (Kaggle).
-Not redistributed in this repository — download separately and place in
-dataset/ before running, per the source's licensing terms.
+### Employee Pipeline
 
-Design Decisions
+- Cleaning
+- Deduplication
+- Standardisation
 
-See docs/design_decisions.md for the reasoning
-behind key architectural and data-modeling choices made throughout this
-project, including trade-offs made due to Databricks Free Edition
-limitations.
+## Gold
+
+### Star Schema
+
+- fact_claims
+- dim_agent
+- dim_customer
+- dim_policy
+- dim_date
+
+### Business Marts
+
+- Fraud signals
+- Agent risk metrics
+- Loss ratio reporting
+
+---
+
+# How to Run
+
+### 1. Create Unity Catalog Objects
+
+Create:
+
+- Catalog
+- Bronze schema
+- Silver schema
+- Gold schema
+
+### 2. Upload Source Files
+
+Upload the following files to a Unity Catalog Volume:
+
+- `employee_data.csv`
+- `insurance_data.csv`
+
+### 3. Run Bronze Pipeline
+
+```python
+notebooks/02_bronze_autoloader.py
+```
+
+### 4. Deploy Silver Claims Pipeline
+
+Register the following directory as a Delta Live Tables pipeline:
+
+```text
+notebooks/silver_claims_pipeline/
+```
+
+### 5. Populate Employee Table
+
+```python
+notebooks/03_silver_employee.py
+```
+
+### 6. Build Gold Layer
+
+Run the Gold notebooks (coming soon).
+
+---
+
+# Dataset
+
+**Source:** Insurance Claims for Fraud Detection (Kaggle)
+
+The dataset is **not redistributed** in this repository.
+
+Download it separately and place it inside:
+
+```text
+dataset/
+```
+
+before running the project.
+
+---
+
+# Project Status
+
+| Component | Status |
+|-----------|--------|
+| Bronze Layer | ✅ Complete |
+| Silver Layer | ✅ Complete |
+| Gold Star Schema | 🚧 In Progress |
+| Business Marts | 🚧 In Progress |
+| Dashboard | 🚧 Planned |
+| CI/CD | 🚧 Planned |
+
+---
+
+# Documentation
+
+Additional documentation is available in the **docs/** folder.
+
+- **data_profile.md** – Dataset profiling and exploration
+- **design_decisions.md** – Architecture choices and trade-offs
+- **screenshots/** – Pipeline and dashboard screenshots
