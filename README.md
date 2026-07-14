@@ -29,6 +29,12 @@ This project helps investigators prioritise claims by surfacing records that exh
 The output is intended to support **human investigation**, not automatically classify claims as fraudulent.
 
 
+# Architecture
+
+<p align="center">
+  <img src="Assets/Databricks Insurance Architecture.png" alt="Databricks Insurance ETL Architecture" width="900"/>
+</p>
+
 # Data Model
 
 The Gold layer follows a dimensional star schema.
